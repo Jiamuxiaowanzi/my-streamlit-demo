@@ -323,7 +323,9 @@ def plan_route():
     
     st.session_state.current_route = route
     st.session_state.current_waypoint_index = 0
-    # ====================== 飞行监控函数 ======================
+    st.session_state.current_position = start
+    st.session_state.simulation_running = False
+# ====================== 飞行监控函数 ======================
 def format_time(seconds):
     minutes = int(seconds // 60)
     secs = int(seconds % 60)
@@ -1021,5 +1023,3 @@ if st.session_state.mission_active and not st.session_state.mission_paused:
 # ====================== 页脚 ======================
 st.markdown("---")
 st.markdown("🚁 无人机航线规划与飞行监控系统 | 智能穿行模式自动寻找安全通道 | 开始任务后自动每1.5秒前进一个航点")
-    st.session_state.current_position = start
-    st.session_state.simulation_running = False
