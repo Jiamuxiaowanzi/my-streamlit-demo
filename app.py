@@ -97,7 +97,7 @@ if "current_waypoint_index" not in st.session_state:
 if "mission_start_time" not in st.session_state:
     st.session_state.mission_start_time = None
 if "flight_speed" not in st.session_state:
-    st.session_state.flight_speed = 3.0  # 初始速度较慢
+    st.session_state.flight_speed = 5.0
 if "battery_level" not in st.session_state:
     st.session_state.battery_level = 100
 if "flight_log" not in st.session_state:
@@ -106,28 +106,22 @@ if "current_position" not in st.session_state:
     st.session_state.current_position = None
 if "simulation_running" not in st.session_state:
     st.session_state.simulation_running = False
-if "auto_advance" not in st.session_state:
-    st.session_state.auto_advance = True
-if "advance_interval" not in st.session_state:
-    st.session_state.advance_interval = 1.2  # 初始间隔
-if "last_advance_time" not in st.session_state:
-    st.session_state.last_advance_time = None
 if "flight_path_history" not in st.session_state:
     st.session_state.flight_path_history = []
 
 # ====================== 自动加速相关状态 ======================
 if "auto_acceleration" not in st.session_state:
-    st.session_state.auto_acceleration = True  # 自动加速开关
+    st.session_state.auto_acceleration = True
 if "acceleration_rate" not in st.session_state:
-    st.session_state.acceleration_rate = 0.3  # 每航点加速量 (m/s)
+    st.session_state.acceleration_rate = 0.5
 if "max_speed" not in st.session_state:
-    st.session_state.max_speed = 12.0  # 最大速度限制
+    st.session_state.max_speed = 12.0
 if "min_speed" not in st.session_state:
-    st.session_state.min_speed = 3.0  # 最小速度限制
+    st.session_state.min_speed = 3.0
 if "speed_increase_count" not in st.session_state:
-    st.session_state.speed_increase_count = 0  # 已加速次数
+    st.session_state.speed_increase_count = 0
 if "last_speed_update" not in st.session_state:
-    st.session_state.last_speed_update = 0  # 上次速度更新的航点索引
+    st.session_state.last_speed_update = 0
 
 # ====================== 通信链路状态 ======================
 if "gcs_status" not in st.session_state:
@@ -228,7 +222,6 @@ def get_polygon_center(polygon):
     return sum(lats)/len(lats), sum(lngs)/len(lngs)
 
 def is_path_safe(start, end, obstacles, flight_altitude, safety_radius):
-    """检查路径是否安全（考虑安全半径）"""
     for obs in obstacles:
         if obs.get("height", 0) >= flight_altitude:
             polygon = obs.get("polygon", [])
@@ -237,9 +230,8 @@ def is_path_safe(start, end, obstacles, flight_altitude, safety_radius):
                     return False
     return True
 
-# ====================== 通用 Dijkstra 路径规划 ======================
+# ====================== Dijkstra 路径规划 ======================
 def dijkstra_path(nodes, start, end, obstacles, flight_altitude, safety_radius):
-    """在节点列表中找最短安全路径，返回路径点列表"""
     unique = []
     for n in nodes:
         if n not in unique:
@@ -287,7 +279,7 @@ def dijkstra_path(nodes, start, end, obstacles, flight_altitude, safety_radius):
         cur = prev[cur]
     return path
 
-# ====================== 智能穿行路径规划 ======================
+# ====================== 路径规划 ======================
 def plan_route_best(start, end, obstacles, flight_altitude, safety_radius):
     high_obstacles = [obs for obs in obstacles if obs.get("height", 0) >= flight_altitude]
     if not high_obstacles:
@@ -384,11 +376,9 @@ def plan_route():
     st.session_state.current_position = start
     st.session_state.simulation_running = False
     
-    # 重置加速相关变量
     st.session_state.speed_increase_count = 0
     st.session_state.last_speed_update = 0
-    st.session_state.flight_speed = st.session_state.min_speed
-    st.session_state.advance_interval = 1.2
+    st.session_state.flight_speed = st.session_state.min_speed if st.session_state.auto_acceleration else 5.0
     
     add_flight_log("航线规划", f"规划完成，共{len(route)}个航点，总距离{calculate_total_distance(route):.1f}m", "success")
 
@@ -435,21 +425,15 @@ def add_flight_log(action, details, level="info"):
         st.session_state.flight_log = st.session_state.flight_log[:50]
 
 def update_speed_automatically():
-    """自动更新速度（渐进加速）"""
     if not st.session_state.auto_acceleration:
         return
     
     if st.session_state.mission_active and not st.session_state.mission_paused:
         current_wp = st.session_state.current_waypoint_index
-        total_wp = len(st.session_state.current_route) - 1
         
         # 每经过2个航点加速一次
-        if current_wp > st.session_state.last_speed_update + 1:
-            # 计算新速度
-            new_speed = min(
-                st.session_state.max_speed,
-                st.session_state.flight_speed + st.session_state.acceleration_rate
-            )
+        if current_wp > 0 and current_wp % 2 == 0 and current_wp > st.session_state.last_speed_update:
+            new_speed = min(st.session_state.max_speed, st.session_state.flight_speed + st.session_state.acceleration_rate)
             
             if new_speed > st.session_state.flight_speed:
                 old_speed = st.session_state.flight_speed
@@ -457,17 +441,14 @@ def update_speed_automatically():
                 st.session_state.speed_increase_count += 1
                 st.session_state.last_speed_update = current_wp
                 
-                # 根据速度调整间隔
-                st.session_state.advance_interval = max(0.4, 1.2 - (st.session_state.flight_speed - 3) * 0.08)
-                
                 add_flight_log(
                     "自动加速", 
-                    f"速度从 {old_speed:.1f} m/s 提升至 {st.session_state.flight_speed:.1f} m/s (第{st.session_state.speed_increase_count}次加速)",
+                    f"速度从 {old_speed:.1f} m/s 提升至 {st.session_state.flight_speed:.1f} m/s",
                     "success"
                 )
 
-def advance_waypoint_auto():
-    """自动前进一个航点"""
+def advance_waypoint():
+    """前进一个航点"""
     if not st.session_state.current_route:
         return False
     
@@ -483,13 +464,12 @@ def advance_waypoint_auto():
             "speed": st.session_state.flight_speed
         })
         
-        # 模拟电池消耗（根据实际距离）
+        # 模拟电池消耗
         segment_distance = calculate_distance(
             st.session_state.current_route[st.session_state.current_waypoint_index - 1],
             st.session_state.current_position
         )
-        # 速度越快，能耗越高
-        energy_factor = 1 + (st.session_state.flight_speed - st.session_state.min_speed) / st.session_state.max_speed * 0.5
+        energy_factor = 1 + (st.session_state.flight_speed - st.session_state.min_speed) / st.session_state.max_speed * 0.5 if st.session_state.max_speed > st.session_state.min_speed else 1
         battery_consumption = (segment_distance / 100) * 0.8 * energy_factor
         st.session_state.battery_level = max(0, st.session_state.battery_level - battery_consumption)
         
@@ -523,12 +503,9 @@ def start_mission():
     st.session_state.battery_level = 100
     st.session_state.simulation_running = True
     st.session_state.flight_path_history = []
-    st.session_state.last_advance_time = time.time()
     
-    # 重置加速相关变量
     if st.session_state.auto_acceleration:
         st.session_state.flight_speed = st.session_state.min_speed
-        st.session_state.advance_interval = 1.2
         st.session_state.speed_increase_count = 0
         st.session_state.last_speed_update = 0
     
@@ -536,8 +513,7 @@ def start_mission():
         "任务开始", 
         f"航线共 {len(st.session_state.current_route)-1} 个航段 | "
         f"总距离{calculate_total_distance(st.session_state.current_route):.1f}m | "
-        f"初始速度{st.session_state.flight_speed}m/s | "
-        f"{'自动加速已启用' if st.session_state.auto_acceleration else '手动模式'}",
+        f"初始速度{st.session_state.flight_speed:.1f}m/s",
         "success"
     )
     return True
@@ -550,7 +526,6 @@ def pause_mission():
 def resume_mission():
     st.session_state.mission_paused = False
     st.session_state.simulation_running = True
-    st.session_state.last_advance_time = time.time()
     add_flight_log("任务恢复", "", "success")
 
 def stop_mission():
@@ -560,7 +535,6 @@ def stop_mission():
     st.session_state.current_waypoint_index = 0
     st.session_state.mission_start_time = None
     st.session_state.current_position = st.session_state.current_route[0] if st.session_state.current_route else None
-    st.session_state.last_advance_time = None
     add_flight_log("任务停止", "", "error")
 
 def reset_mission():
@@ -571,13 +545,11 @@ def reset_mission():
     st.session_state.flight_path_history = []
     if st.session_state.auto_acceleration:
         st.session_state.flight_speed = st.session_state.min_speed
-        st.session_state.advance_interval = 1.2
         st.session_state.speed_increase_count = 0
         st.session_state.last_speed_update = 0
     add_flight_log("任务重置", "", "info")
 
 def update_heartbeat():
-    """更新心跳"""
     new_seq = len(st.session_state.heartbeat_history) + 1
     st.session_state.heartbeat_history.append({
         "seq": new_seq,
@@ -596,7 +568,6 @@ def create_map(show_flight=True):
         attr="高德地图"
     )
     
-    # 只在非飞行模式下显示绘图工具
     if not st.session_state.mission_active and not show_flight:
         draw = Draw(
             draw_options={
@@ -614,28 +585,24 @@ def create_map(show_flight=True):
         )
         draw.add_to(m)
     
-    # 起点标记
     folium.Marker(
         location=st.session_state.start_point,
         popup="🚁 起点",
         icon=folium.Icon(color="red", icon="play", prefix="fa")
     ).add_to(m)
     
-    # 终点标记
     folium.Marker(
         location=st.session_state.end_point,
         popup="🎯 终点",
         icon=folium.Icon(color="green", icon="flag-checkered", prefix="fa")
     ).add_to(m)
     
-    # 障碍物绘制
     for i, obs in enumerate(st.session_state.obstacles):
         polygon = obs.get("polygon", [])
         height = obs.get("height", 10)
         name = obs.get("name", f"障碍物{i+1}")
         
         if polygon:
-            # 根据高度决定颜色
             if height >= st.session_state.flight_altitude:
                 color = "#ff0000"
                 fill_opacity = 0.4
@@ -653,9 +620,7 @@ def create_map(show_flight=True):
                 popup=f"{name}\n高度: {height}m"
             ).add_to(m)
     
-    # 航线绘制
     if st.session_state.current_route:
-        # 完整航线（虚线）
         folium.PolyLine(
             locations=st.session_state.current_route,
             color="#00ff00",
@@ -664,7 +629,6 @@ def create_map(show_flight=True):
             dash_array='10, 10'
         ).add_to(m)
         
-        # 已飞路径（实线）
         if show_flight and st.session_state.current_waypoint_index > 0:
             completed = st.session_state.current_route[:st.session_state.current_waypoint_index + 1]
             if len(completed) > 1:
@@ -675,7 +639,6 @@ def create_map(show_flight=True):
                     opacity=0.9
                 ).add_to(m)
         
-        # 航点标记
         for i, point in enumerate(st.session_state.current_route):
             if i == 0:
                 color = "red"
@@ -684,7 +647,6 @@ def create_map(show_flight=True):
             else:
                 color = "orange"
             
-            # 已飞过的航点变为浅绿色
             if show_flight and i <= st.session_state.current_waypoint_index:
                 color = "lightgreen"
             
@@ -697,7 +659,6 @@ def create_map(show_flight=True):
                 popup=f"航点 {i+1}"
             ).add_to(m)
     
-    # 无人机当前位置
     if show_flight and st.session_state.current_position:
         folium.Marker(
             location=st.session_state.current_position,
@@ -705,7 +666,6 @@ def create_map(show_flight=True):
             icon=folium.Icon(color="blue", icon="plane", prefix="fa")
         ).add_to(m)
         
-        # 位置圆圈
         folium.Circle(
             location=st.session_state.current_position,
             radius=st.session_state.safety_radius,
@@ -715,7 +675,6 @@ def create_map(show_flight=True):
             fill_opacity=0.2
         ).add_to(m)
         
-        # 到下一个航点的连线
         if st.session_state.current_waypoint_index < len(st.session_state.current_route) - 1:
             next_point = st.session_state.current_route[st.session_state.current_waypoint_index + 1]
             folium.PolyLine(
@@ -731,7 +690,7 @@ def create_map(show_flight=True):
 # ====================== 页面布局 ======================
 tab1, tab2, tab3 = st.tabs(["🗺️ 地图与航线规划", "📡 飞行任务监控", "📊 飞行日志与遥测"])
 
-# ====================== 标签页1：地图与航线规划 ======================
+# ====================== 标签页1 ======================
 with tab1:
     col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns(5)
     with col_btn1:
@@ -766,7 +725,6 @@ with tab1:
     
     st.divider()
     
-    # 模式提示
     if st.session_state.set_mode == 'start':
         st.info("🔴 当前模式：设置起点 - 请点击地图上的位置")
     elif st.session_state.set_mode == 'end':
@@ -781,7 +739,6 @@ with tab1:
         m = create_map(show_flight=False)
         output = st_folium(m, width=850, height=550, returned_objects=["last_clicked", "all_drawings"], key="planning_map")
         
-        # 处理地图点击
         if output and output.get("last_clicked"):
             clicked = output["last_clicked"]
             if clicked and "lat" in clicked:
@@ -805,7 +762,6 @@ with tab1:
                         st.toast("✅ 终点已设置", icon="✅")
                         st.rerun()
         
-        # 处理绘制的多边形
         if output and output.get("all_drawings"):
             drawings = output["all_drawings"]
             if len(drawings) > 0:
@@ -816,7 +772,6 @@ with tab1:
                     if st.session_state.pending_polygon != polygon_points:
                         st.session_state.pending_polygon = polygon_points
         
-        # 添加障碍物表单
         if st.session_state.pending_polygon:
             with st.container():
                 st.markdown("### ➕ 添加新障碍物")
@@ -965,7 +920,6 @@ with tab1:
 with tab2:
     st.subheader("🎮 飞行任务控制")
     
-    # 飞行控制按钮
     col_ctl1, col_ctl2, col_ctl3, col_ctl4, col_ctl5 = st.columns(5)
     with col_ctl1:
         if not st.session_state.mission_active:
@@ -1007,7 +961,7 @@ with tab2:
     
     st.divider()
     
-    # ====================== 自动加速控制面板 ======================
+    # 自动加速控制面板
     st.markdown("### ⚡ 自动加速控制")
     
     col_auto1, col_auto2, col_auto3 = st.columns([1, 2, 1])
@@ -1027,7 +981,7 @@ with tab2:
             accel_rate = st.slider(
                 "加速强度 (m/s/每2航点)",
                 min_value=0.1,
-                max_value=1.0,
+                max_value=1.5,
                 value=st.session_state.acceleration_rate,
                 step=0.1,
                 key="accel_rate_slider",
@@ -1039,59 +993,54 @@ with tab2:
     
     with col_auto3:
         if st.session_state.auto_acceleration:
-            col_speed_limit1, col_speed_limit2 = st.columns(2)
-            with col_speed_limit1:
+            col_speed1, col_speed2 = st.columns(2)
+            with col_speed1:
                 min_speed = st.number_input(
                     "最小速度",
                     min_value=1.0,
-                    max_value=5.0,
+                    max_value=8.0,
                     value=st.session_state.min_speed,
                     step=0.5,
-                    key="min_speed_input",
-                    help="初始速度"
+                    key="min_speed_input"
                 )
                 if min_speed != st.session_state.min_speed:
                     st.session_state.min_speed = min_speed
-                    if not st.session_state.mission_active:
-                        st.session_state.flight_speed = min_speed
-            with col_speed_limit2:
+            with col_speed2:
                 max_speed = st.number_input(
                     "最大速度",
                     min_value=5.0,
                     max_value=20.0,
                     value=st.session_state.max_speed,
                     step=0.5,
-                    key="max_speed_input",
-                    help="最高速度限制"
+                    key="max_speed_input"
                 )
                 if max_speed != st.session_state.max_speed:
                     st.session_state.max_speed = max_speed
     
-    # 显示当前加速状态
+    # 显示加速状态
     if st.session_state.auto_acceleration and st.session_state.mission_active:
-        progress_to_max = (st.session_state.flight_speed - st.session_state.min_speed) / (st.session_state.max_speed - st.session_state.min_speed) * 100
-        st.progress(min(100, int(progress_to_max)), text=f"🏁 加速进度: {st.session_state.flight_speed:.1f}/{st.session_state.max_speed:.1f} m/s")
+        if st.session_state.max_speed > st.session_state.min_speed:
+            progress = (st.session_state.flight_speed - st.session_state.min_speed) / (st.session_state.max_speed - st.session_state.min_speed) * 100
+            st.progress(min(100, int(progress)), text=f"🏁 加速进度: {st.session_state.flight_speed:.1f}/{st.session_state.max_speed:.1f} m/s")
         st.caption(f"📈 已加速 {st.session_state.speed_increase_count} 次 | 每2个航点加速 {st.session_state.acceleration_rate:.1f} m/s")
     
     st.divider()
     
-    # 速度显示面板
+    # 速度显示
     st.markdown("### 📊 当前飞行参数")
-    col_speed_display1, col_speed_display2, col_speed_display3 = st.columns(3)
-    with col_speed_display1:
-        st.metric("🚁 当前速度", f"{st.session_state.flight_speed:.1f} m/s", 
-                 delta=f"{st.session_state.flight_speed - st.session_state.min_speed:.1f}" if st.session_state.mission_active else None)
-    with col_speed_display2:
-        st.metric("⏱️ 航点间隔", f"{st.session_state.advance_interval:.1f} 秒")
-    with col_speed_display3:
-        if st.session_state.auto_acceleration:
-            st.metric("🎯 目标速度", f"{st.session_state.max_speed:.1f} m/s")
-        else:
-            st.metric("⚙️ 模式", "手动控制")
+    col_disp1, col_disp2, col_disp3 = st.columns(3)
+    with col_disp1:
+        st.metric("🚁 当前速度", f"{st.session_state.flight_speed:.1f} m/s")
+    with col_disp2:
+        remaining = calculate_remaining_distance(st.session_state.current_route, st.session_state.current_waypoint_index)
+        eta = get_estimated_arrival_time()
+        st.metric("📏 剩余距离", f"{remaining:.0f} m")
+    with col_disp3:
+        st.metric("🎯 预计到达", format_time(eta))
     
     st.divider()
     
-    # 飞行实时状态卡片
+    # 飞行实时状态
     st.subheader("📊 飞行实时状态")
     
     col_stat1, col_stat2, col_stat3, col_stat4, col_stat5, col_stat6 = st.columns(6)
@@ -1104,30 +1053,22 @@ with tab2:
         st.metric("📍 当前航点", current_wp)
     
     with col_stat2:
-        st.metric("⚡ 实时速度", f"{st.session_state.flight_speed:.1f} m/s")
+        st.metric("⚡ 飞行速度", f"{st.session_state.flight_speed:.1f} m/s")
     
     with col_stat3:
         st.metric("⏱️ 已用时间", format_time(get_elapsed_time()))
     
     with col_stat4:
-        if st.session_state.current_route:
-            remaining_dist = calculate_remaining_distance(st.session_state.current_route, st.session_state.current_waypoint_index)
-        else:
-            remaining_dist = 0
-        st.metric("📏 剩余距离", f"{remaining_dist:.0f} m")
+        st.metric("🔋 电池电量", f"{st.session_state.battery_level:.1f}%")
     
     with col_stat5:
-        st.metric("🎯 预计到达", format_time(get_estimated_arrival_time()))
+        if st.session_state.auto_acceleration:
+            st.metric("🎯 目标速度", f"{st.session_state.max_speed:.1f} m/s")
+        else:
+            st.metric("⚙️ 模式", "手动")
     
     with col_stat6:
-        battery = st.session_state.battery_level
-        if battery > 60:
-            battery_color = "🟢"
-        elif battery > 30:
-            battery_color = "🟡"
-        else:
-            battery_color = "🔴"
-        st.metric("🔋 电量模拟", f"{battery_color} {battery:.1f}%")
+        st.metric("🚀 加速次数", f"{st.session_state.speed_increase_count}")
     
     st.divider()
     
@@ -1136,10 +1077,8 @@ with tab2:
         total_wp = len(st.session_state.current_route) - 1
         current_wp = st.session_state.current_waypoint_index
         progress = current_wp / total_wp if total_wp > 0 else 0
-        
         st.progress(progress, text=f"📈 任务进度: {current_wp}/{total_wp} 航点")
         
-        # 距离进度
         total_dist = calculate_total_distance(st.session_state.current_route)
         remaining_dist = calculate_remaining_distance(st.session_state.current_route, st.session_state.current_waypoint_index)
         dist_progress = (total_dist - remaining_dist) / total_dist if total_dist > 0 else 0
@@ -1151,6 +1090,17 @@ with tab2:
     st.subheader("🗺️ 实时飞行地图")
     flight_map = create_map(show_flight=True)
     st_folium(flight_map, width=900, height=450, returned_objects=[], key="monitor_map")
+    
+    st.divider()
+    
+    # 手动前进按钮
+    col_manual1, col_manual2, col_manual3 = st.columns([1, 2, 1])
+    with col_manual2:
+        if st.button("✈️ 手动前进一个航点", key="manual_advance_btn", use_container_width=True):
+            if advance_waypoint():
+                st.rerun()
+            else:
+                st.warning("已是最后一个航点")
     
     st.divider()
     
@@ -1176,9 +1126,8 @@ with tab2:
     
     st.markdown("---")
     st.markdown("🔗 **数据链路**: GCS ↔️ OBC ↔️ FCU")
-    st.caption("📊 数据流: 航线指令 → 位置反馈 → 遥测数据")
 
-# ====================== 标签页3：飞行日志与遥测 ======================
+# ====================== 标签页3 ======================
 with tab3:
     col_log1, col_log2 = st.columns([1, 1])
     
@@ -1215,7 +1164,7 @@ with tab3:
         telemetry_table = {
             "参数": ["📍 当前位置", "🎯 当前航点", "🏁 总航点数", "⚡ 实时速度", "✈️ 飞行高度", 
                     "🛡️ 安全半径", "🗺️ 绕行模式", "🔋 电池电量", "⏱️ 已用时间", 
-                    "📏 剩余距离", "🎯 预计到达时间", "⏲️ 航点间隔", "🚀 加速次数"],
+                    "📏 剩余距离", "🎯 预计到达时间", "🚀 加速次数"],
             "数值": [
                 current_pos,
                 f"{st.session_state.current_waypoint_index}",
@@ -1223,12 +1172,11 @@ with tab3:
                 f"{st.session_state.flight_speed:.1f} m/s",
                 f"{st.session_state.flight_altitude} m",
                 f"{st.session_state.safety_radius} m",
-                {"best": "🌟 智能穿行", "left": "⬅️ 强制向左", "right": "➡️ 强制向右"}[st.session_state.route_mode],
+                {"best": "智能穿行", "left": "强制向左", "right": "强制向右"}[st.session_state.route_mode],
                 f"{st.session_state.battery_level:.1f}%",
                 format_time(get_elapsed_time()),
                 f"{calculate_remaining_distance(st.session_state.current_route, st.session_state.current_waypoint_index):.0f} m",
                 format_time(get_estimated_arrival_time()),
-                f"{st.session_state.advance_interval:.1f}s",
                 f"{st.session_state.speed_increase_count} 次"
             ]
         }
@@ -1236,8 +1184,8 @@ with tab3:
         df = pd.DataFrame(telemetry_table)
         st.dataframe(df, use_container_width=True, hide_index=True)
         
-        # 飞行路径历史
         st.divider()
+        
         st.subheader("🛤️ 飞行路径历史")
         
         if st.session_state.flight_path_history:
@@ -1248,7 +1196,6 @@ with tab3:
         
         st.divider()
         
-        # 心跳检测
         st.subheader("💓 心跳检测")
         
         col_heart1, col_heart2 = st.columns(2)
@@ -1276,7 +1223,6 @@ with tab3:
 # ====================== 自动心跳 ======================
 if st.session_state.heartbeat_running:
     now = datetime.now()
-    
     if len(st.session_state.heartbeat_history) == 0:
         update_heartbeat()
         time.sleep(0.5)
@@ -1288,33 +1234,62 @@ if st.session_state.heartbeat_running:
             time.sleep(0.5)
             st.rerun()
 
-# ====================== 核心：自动飞行循环 ======================
-# 检查是否需要前进到下一个航点
-if st.session_state.mission_active and not st.session_state.mission_paused:
-    # 获取当前时间
-    current_time = time.time()
-    
-    # 初始化上次前进时间
-    if st.session_state.last_advance_time is None:
-        st.session_state.last_advance_time = current_time
-    
-    # 检查是否到达前进时间
-    if current_time - st.session_state.last_advance_time >= st.session_state.advance_interval:
-        # 更新上次前进时间
-        st.session_state.last_advance_time = current_time
-        
-        # 前进到下一个航点
-        if advance_waypoint_auto():
-            # 如果任务还在进行中，自动刷新页面
-            if st.session_state.mission_active:
-                st.rerun()
-
 # ====================== 页脚 ======================
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #666; padding: 20px;">
     🚁 无人机航线规划与飞行监控系统 | 智能穿行模式自动寻找安全通道 | 实时飞行监控
     <br>
-    💡 自动加速模式：无人机将自动从最小速度逐渐加速到最大速度，每2个航点加速一次
+    💡 提示：点击"手动前进一个航点"按钮可手动控制飞行 | 开启"自动加速"后速度会逐渐提升
 </div>
 """, unsafe_allow_html=True)
+
+# ====================== 自动飞行控制区 ======================
+st.markdown("---")
+st.subheader("🎮 自动飞行控制")
+
+col_auto_control1, col_auto_control2, col_auto_control3 = st.columns(3)
+
+with col_auto_control1:
+    if st.session_state.mission_active and not st.session_state.mission_paused:
+        if st.button("⏸️ 暂停自动飞行", key="pause_auto_btn", use_container_width=True):
+            pause_mission()
+            st.rerun()
+    else:
+        if st.button("▶️ 开始自动飞行", key="start_auto_btn", use_container_width=True, type="primary"):
+            if start_mission():
+                st.rerun()
+
+with col_auto_control2:
+    if st.session_state.mission_active:
+        interval = st.slider(
+            "航点间隔 (秒)",
+            min_value=0.5,
+            max_value=3.0,
+            value=1.0,
+            step=0.1,
+            key="auto_interval",
+            help="每个航点之间的等待时间"
+        )
+        # 根据速度调整间隔
+        adjusted_interval = max(0.5, interval / (st.session_state.flight_speed / 5))
+        st.caption(f"实际间隔: {adjusted_interval:.1f}秒")
+        
+        # 自动前进逻辑
+        if "last_auto_time" not in st.session_state:
+            st.session_state.last_auto_time = time.time()
+        
+        current_time = time.time()
+        if current_time - st.session_state.last_auto_time >= adjusted_interval:
+            st.session_state.last_auto_time = current_time
+            if advance_waypoint():
+                st.rerun()
+    else:
+        st.info("⏹️ 未开始飞行")
+
+with col_auto_control3:
+    if st.session_state.current_route:
+        total_wp = len(st.session_state.current_route) - 1
+        remaining = total_wp - st.session_state.current_waypoint_index
+        st.metric("✈️ 剩余航点", f"{remaining}")
+        st.metric("📊 完成进度", f"{st.session_state.current_waypoint_index}/{total_wp}")
