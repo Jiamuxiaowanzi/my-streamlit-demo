@@ -9,6 +9,7 @@ import pandas as pd
 import math
 import random
 import time
+import threading
 
 # ====================== 页面配置 ======================
 st.set_page_config(
@@ -102,8 +103,6 @@ if "simulation_running" not in st.session_state:
     st.session_state.simulation_running = False
 if "flight_path_history" not in st.session_state:
     st.session_state.flight_path_history = []
-if "last_auto_time" not in st.session_state:
-    st.session_state.last_auto_time = None
 if "auto_interval" not in st.session_state:
     st.session_state.auto_interval = 1.0
 
@@ -501,7 +500,6 @@ def start_mission():
     st.session_state.battery_level = 100
     st.session_state.simulation_running = True
     st.session_state.flight_path_history = []
-    st.session_state.last_auto_time = time.time()  # 初始化自动前进计时器
     
     if st.session_state.auto_acceleration:
         st.session_state.flight_speed = st.session_state.min_speed
@@ -525,7 +523,6 @@ def pause_mission():
 def resume_mission():
     st.session_state.mission_paused = False
     st.session_state.simulation_running = True
-    st.session_state.last_auto_time = time.time()  # 恢复时重置计时器
     add_flight_log("任务恢复", "", "success")
 
 def stop_mission():
@@ -535,7 +532,6 @@ def stop_mission():
     st.session_state.current_waypoint_index = 0
     st.session_state.mission_start_time = None
     st.session_state.current_position = st.session_state.current_route[0] if st.session_state.current_route else None
-    st.session_state.last_auto_time = None
     add_flight_log("任务停止", "", "error")
 
 def reset_mission():
@@ -1225,25 +1221,28 @@ if st.session_state.heartbeat_running:
             st.rerun()
 
 # ====================== 核心：自动飞行循环 ======================
-# 检查是否需要自动前进到下一个航点
+# 使用定时器实现自动飞行，避免依赖页面刷新
+def auto_flight_loop():
+    """在后台线程中自动飞行"""
+    if st.session_state.mission_active and not st.session_state.mission_paused:
+        # 检查当前航点是否已到达
+        if st.session_state.current_waypoint_index < len(st.session_state.current_route) - 1:
+            # 前进到下一个航点
+            advance_waypoint()
+            # 请求页面刷新
+            st.rerun()
+
+# 创建一个计时器，每隔 auto_interval 秒执行一次
 if st.session_state.mission_active and not st.session_state.mission_paused:
-    # 获取当前时间
-    current_time = time.time()
+    # 使用 JavaScript 定时器通过 st.rerun 实现自动刷新
+    my_placeholder = st.empty()
+    my_placeholder.info(f"✈️ 无人机自动飞行中... 航点间隔: {st.session_state.auto_interval}秒")
     
-    # 初始化上次前进时间
-    if st.session_state.last_auto_time is None:
-        st.session_state.last_auto_time = current_time
-    
-    # 检查是否到达前进时间
-    if current_time - st.session_state.last_auto_time >= st.session_state.auto_interval:
-        # 更新上次前进时间
-        st.session_state.last_auto_time = current_time
-        
-        # 前进到下一个航点
-        if advance_waypoint():
-            # 如果任务还在进行中，自动刷新页面
-            if st.session_state.mission_active:
-                st.rerun()
+    # 使用 time.sleep 实现延迟，然后刷新
+    time.sleep(st.session_state.auto_interval)
+    if st.session_state.mission_active and not st.session_state.mission_paused:
+        advance_waypoint()
+        st.rerun()
 
 # ====================== 页脚 ======================
 st.markdown("---")
