@@ -42,12 +42,6 @@ st.markdown("""
         color: #ff0000;
         font-weight: bold;
     }
-    .speed-control {
-        background-color: #f0f2f6;
-        border-radius: 10px;
-        padding: 10px;
-        margin: 5px 0;
-    }
     .auto-speed {
         background: linear-gradient(90deg, #4CAF50, #2196F3);
         border-radius: 10px;
@@ -108,6 +102,10 @@ if "simulation_running" not in st.session_state:
     st.session_state.simulation_running = False
 if "flight_path_history" not in st.session_state:
     st.session_state.flight_path_history = []
+if "last_auto_time" not in st.session_state:
+    st.session_state.last_auto_time = None
+if "auto_interval" not in st.session_state:
+    st.session_state.auto_interval = 1.0
 
 # ====================== 自动加速相关状态 ======================
 if "auto_acceleration" not in st.session_state:
@@ -503,6 +501,7 @@ def start_mission():
     st.session_state.battery_level = 100
     st.session_state.simulation_running = True
     st.session_state.flight_path_history = []
+    st.session_state.last_auto_time = time.time()  # 初始化自动前进计时器
     
     if st.session_state.auto_acceleration:
         st.session_state.flight_speed = st.session_state.min_speed
@@ -526,6 +525,7 @@ def pause_mission():
 def resume_mission():
     st.session_state.mission_paused = False
     st.session_state.simulation_running = True
+    st.session_state.last_auto_time = time.time()  # 恢复时重置计时器
     add_flight_log("任务恢复", "", "success")
 
 def stop_mission():
@@ -535,6 +535,7 @@ def stop_mission():
     st.session_state.current_waypoint_index = 0
     st.session_state.mission_start_time = None
     st.session_state.current_position = st.session_state.current_route[0] if st.session_state.current_route else None
+    st.session_state.last_auto_time = None
     add_flight_log("任务停止", "", "error")
 
 def reset_mission():
@@ -1093,17 +1094,6 @@ with tab2:
     
     st.divider()
     
-    # 手动前进按钮
-    col_manual1, col_manual2, col_manual3 = st.columns([1, 2, 1])
-    with col_manual2:
-        if st.button("✈️ 手动前进一个航点", key="manual_advance_btn", use_container_width=True):
-            if advance_waypoint():
-                st.rerun()
-            else:
-                st.warning("已是最后一个航点")
-    
-    st.divider()
-    
     # 通信链路拓扑
     st.subheader("📡 通信链路拓扑与数据流")
     
@@ -1234,62 +1224,66 @@ if st.session_state.heartbeat_running:
             time.sleep(0.5)
             st.rerun()
 
+# ====================== 核心：自动飞行循环 ======================
+# 检查是否需要自动前进到下一个航点
+if st.session_state.mission_active and not st.session_state.mission_paused:
+    # 获取当前时间
+    current_time = time.time()
+    
+    # 初始化上次前进时间
+    if st.session_state.last_auto_time is None:
+        st.session_state.last_auto_time = current_time
+    
+    # 检查是否到达前进时间
+    if current_time - st.session_state.last_auto_time >= st.session_state.auto_interval:
+        # 更新上次前进时间
+        st.session_state.last_auto_time = current_time
+        
+        # 前进到下一个航点
+        if advance_waypoint():
+            # 如果任务还在进行中，自动刷新页面
+            if st.session_state.mission_active:
+                st.rerun()
+
 # ====================== 页脚 ======================
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #666; padding: 20px;">
     🚁 无人机航线规划与飞行监控系统 | 智能穿行模式自动寻找安全通道 | 实时飞行监控
     <br>
-    💡 提示：点击"手动前进一个航点"按钮可手动控制飞行 | 开启"自动加速"后速度会逐渐提升
+    💡 提示：点击"开始任务"后无人机将自动按间隔飞行 | 开启"自动加速"后速度会逐渐提升
 </div>
 """, unsafe_allow_html=True)
 
 # ====================== 自动飞行控制区 ======================
 st.markdown("---")
-st.subheader("🎮 自动飞行控制")
+st.subheader("🎮 自动飞行设置")
 
 col_auto_control1, col_auto_control2, col_auto_control3 = st.columns(3)
 
 with col_auto_control1:
-    if st.session_state.mission_active and not st.session_state.mission_paused:
-        if st.button("⏸️ 暂停自动飞行", key="pause_auto_btn", use_container_width=True):
-            pause_mission()
-            st.rerun()
-    else:
-        if st.button("▶️ 开始自动飞行", key="start_auto_btn", use_container_width=True, type="primary"):
-            if start_mission():
-                st.rerun()
+    st.session_state.auto_interval = st.slider(
+        "航点间隔 (秒)",
+        min_value=0.5,
+        max_value=3.0,
+        value=st.session_state.auto_interval,
+        step=0.1,
+        key="auto_interval_slider",
+        help="每个航点之间的等待时间，值越小飞行越快"
+    )
+    st.caption(f"当前间隔: {st.session_state.auto_interval:.1f}秒")
 
 with col_auto_control2:
-    if st.session_state.mission_active:
-        interval = st.slider(
-            "航点间隔 (秒)",
-            min_value=0.5,
-            max_value=3.0,
-            value=1.0,
-            step=0.1,
-            key="auto_interval",
-            help="每个航点之间的等待时间"
-        )
-        # 根据速度调整间隔
-        adjusted_interval = max(0.5, interval / (st.session_state.flight_speed / 5))
-        st.caption(f"实际间隔: {adjusted_interval:.1f}秒")
-        
-        # 自动前进逻辑
-        if "last_auto_time" not in st.session_state:
-            st.session_state.last_auto_time = time.time()
-        
-        current_time = time.time()
-        if current_time - st.session_state.last_auto_time >= adjusted_interval:
-            st.session_state.last_auto_time = current_time
-            if advance_waypoint():
-                st.rerun()
-    else:
-        st.info("⏹️ 未开始飞行")
-
-with col_auto_control3:
     if st.session_state.current_route:
         total_wp = len(st.session_state.current_route) - 1
         remaining = total_wp - st.session_state.current_waypoint_index
         st.metric("✈️ 剩余航点", f"{remaining}")
         st.metric("📊 完成进度", f"{st.session_state.current_waypoint_index}/{total_wp}")
+    else:
+        st.info("📭 请先规划航线")
+
+with col_auto_control3:
+    if st.session_state.mission_active:
+        st.success(f"✅ 飞行中 | 速度: {st.session_state.flight_speed:.1f} m/s")
+    else:
+        st.info("⏹️ 等待开始")
