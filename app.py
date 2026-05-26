@@ -9,7 +9,6 @@ import pandas as pd
 import math
 import random
 import time
-import threading
 
 # ====================== 页面配置 ======================
 st.set_page_config(
@@ -98,8 +97,8 @@ if "auto_advance" not in st.session_state:
     st.session_state.auto_advance = True
 if "advance_interval" not in st.session_state:
     st.session_state.advance_interval = 1.5
-if "last_update_time" not in st.session_state:
-    st.session_state.last_update_time = None
+if "last_advance_time" not in st.session_state:
+    st.session_state.last_advance_time = None
 if "flight_path_history" not in st.session_state:
     st.session_state.flight_path_history = []
 
@@ -207,16 +206,9 @@ def is_path_safe(start, end, obstacles, flight_altitude, safety_radius):
         if obs.get("height", 0) >= flight_altitude:
             polygon = obs.get("polygon", [])
             if polygon:
-                # 扩展多边形（安全半径）
-                expanded_polygon = expand_polygon(polygon, safety_radius)
-                if line_intersects_polygon(start, end, expanded_polygon):
+                if line_intersects_polygon(start, end, polygon):
                     return False
     return True
-
-def expand_polygon(polygon, radius_meters):
-    """扩展多边形（安全缓冲区）"""
-    # 简化：返回原多边形，实际应用中需要更复杂的缓冲算法
-    return polygon
 
 # ====================== 通用 Dijkstra 路径规划 ======================
 def dijkstra_path(nodes, start, end, obstacles, flight_altitude, safety_radius):
@@ -412,7 +404,7 @@ def add_flight_log(action, details, level="info"):
 def advance_waypoint_auto():
     """自动前进一个航点"""
     if not st.session_state.current_route:
-        return
+        return False
     
     if st.session_state.current_waypoint_index < len(st.session_state.current_route) - 1:
         st.session_state.current_waypoint_index += 1
@@ -439,6 +431,8 @@ def advance_waypoint_auto():
             st.session_state.mission_active = False
             st.session_state.simulation_running = False
             add_flight_log("任务完成", f"总飞行时间: {format_time(get_elapsed_time())}", "success")
+        return True
+    return False
 
 def start_mission():
     if not st.session_state.current_route:
@@ -453,7 +447,7 @@ def start_mission():
     st.session_state.battery_level = 100
     st.session_state.simulation_running = True
     st.session_state.flight_path_history = []
-    st.session_state.last_update_time = time.time()
+    st.session_state.last_advance_time = time.time()  # 初始化上次前进时间
     
     add_flight_log("任务开始", f"航线共 {len(st.session_state.current_route)-1} 个航段，总距离{calculate_total_distance(st.session_state.current_route):.1f}m", "success")
     return True
@@ -466,7 +460,7 @@ def pause_mission():
 def resume_mission():
     st.session_state.mission_paused = False
     st.session_state.simulation_running = True
-    st.session_state.last_update_time = time.time()
+    st.session_state.last_advance_time = time.time()  # 重置计时器
     add_flight_log("任务恢复", "", "success")
 
 def stop_mission():
@@ -476,6 +470,7 @@ def stop_mission():
     st.session_state.current_waypoint_index = 0
     st.session_state.mission_start_time = None
     st.session_state.current_position = st.session_state.current_route[0] if st.session_state.current_route else None
+    st.session_state.last_advance_time = None
     add_flight_log("任务停止", "", "error")
 
 def reset_mission():
@@ -561,15 +556,6 @@ def create_map(show_flight=True):
                 fill_color=color,
                 fill_opacity=fill_opacity,
                 popup=f"{name}\n高度: {height}m"
-            ).add_to(m)
-            
-            # 添加安全缓冲区可视化
-            folium.Polygon(
-                locations=polygon,
-                color="#ffff00",
-                weight=1,
-                fill=False,
-                popup=f"安全缓冲区: {st.session_state.safety_radius}m"
             ).add_to(m)
     
     # 航线绘制
@@ -1133,17 +1119,25 @@ if st.session_state.heartbeat_running:
             st.rerun()
 
 # ====================== 核心：自动飞行循环 ======================
-if st.session_state.mission_active and not st.session_state.mission_paused and st.session_state.auto_advance:
+# 检查是否需要前进到下一个航点
+if st.session_state.mission_active and not st.session_state.mission_paused:
+    # 获取当前时间
     current_time = time.time()
     
-    if st.session_state.last_update_time is None:
-        st.session_state.last_update_time = current_time
-    else:
-        elapsed = current_time - st.session_state.last_update_time
-        if elapsed >= st.session_state.advance_interval:
-            st.session_state.last_update_time = current_time
-            advance_waypoint_auto()
-            st.rerun()
+    # 初始化上次前进时间
+    if st.session_state.last_advance_time is None:
+        st.session_state.last_advance_time = current_time
+    
+    # 检查是否到达前进时间
+    if current_time - st.session_state.last_advance_time >= st.session_state.advance_interval:
+        # 更新上次前进时间
+        st.session_state.last_advance_time = current_time
+        
+        # 前进到下一个航点
+        if advance_waypoint_auto():
+            # 如果任务还在进行中，自动刷新页面
+            if st.session_state.mission_active:
+                st.rerun()
 
 # ====================== 页脚 ======================
 st.markdown("---")
