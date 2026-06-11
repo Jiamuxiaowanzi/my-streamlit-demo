@@ -55,6 +55,48 @@ st.markdown("""
 
 st.title("🚁 无人机航线规划与飞行监控系统")
 
+# ====================== 侧边栏文件状态 ======================
+with st.sidebar:
+    st.markdown("## 📁 文件状态")
+    
+    # 显示文件是否存在
+    col_file1, col_file2 = st.columns(2)
+    with col_file1:
+        if os.path.exists("obstacle_config.json"):
+            st.success("✅ 配置文件")
+        else:
+            st.warning("⚠️ 配置文件")
+    with col_file2:
+        if os.path.exists("obstacles_data.json"):
+            st.success("✅ 障碍物文件")
+        else:
+            st.warning("⚠️ 障碍物文件")
+    
+    # 显示文件大小和修改时间
+    if os.path.exists("obstacle_config.json"):
+        size = os.path.getsize("obstacle_config.json")
+        modified = datetime.fromtimestamp(os.path.getmtime("obstacle_config.json"))
+        st.caption(f"配置文件: {size} 字节")
+        st.caption(f"修改时间: {modified.strftime('%H:%M:%S')}")
+    
+    if os.path.exists("obstacles_data.json"):
+        size = os.path.getsize("obstacles_data.json")
+        modified = datetime.fromtimestamp(os.path.getmtime("obstacles_data.json"))
+        st.caption(f"障碍物文件: {size} 字节")
+        st.caption(f"修改时间: {modified.strftime('%H:%M:%S')}")
+    
+    st.divider()
+    
+    # 快速操作按钮
+    if st.button("📂 查看文件目录", use_container_width=True):
+        st.info(f"📁 文件保存在: {os.getcwd()}")
+    
+    # 显示当前障碍物数量
+    if "obstacles" in st.session_state:
+        st.metric("📦 障碍物数量", len(st.session_state.obstacles))
+    else:
+        st.metric("📦 障碍物数量", 0)
+
 # ====================== 配置文件 ======================
 CONFIG_FILE = "obstacle_config.json"
 OBSTACLES_FILE = "obstacles_data.json"  # 专门的障碍物数据文件
@@ -991,16 +1033,157 @@ with tab1:
         else:
             st.info("📭 暂无障碍物，请在地图上绘制多边形")
         
-        # 显示JSON文件信息
-        if os.path.exists(OBSTACLES_FILE):
-            st.divider()
-            with st.expander("📄 查看JSON文件信息"):
+        # ====================== 文件管理区域 ======================
+        st.divider()
+        st.subheader("📁 文件管理")
+        
+        # 显示文件保存路径
+        current_dir = os.getcwd()
+        st.caption(f"💾 文件保存目录: `{current_dir}`")
+        
+        # 创建文件管理标签页
+        tab_file1, tab_file2, tab_file3 = st.tabs(["📄 查看JSON文件", "📊 文件信息", "⚙️ 文件操作"])
+        
+        with tab_file1:
+            st.markdown("#### obstacle_config.json")
+            if os.path.exists(CONFIG_FILE):
+                try:
+                    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                        config_data = json.load(f)
+                    st.json(config_data)
+                    
+                    # 添加复制按钮
+                    config_json_str = json.dumps(config_data, ensure_ascii=False, indent=2)
+                    st.download_button(
+                        label="📥 下载配置文件",
+                        data=config_json_str,
+                        file_name=f"config_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json",
+                        key="download_config"
+                    )
+                except Exception as e:
+                    st.error(f"读取失败: {e}")
+            else:
+                st.info("配置文件不存在，保存数据后会创建")
+            
+            st.markdown("#### obstacles_data.json")
+            if os.path.exists(OBSTACLES_FILE):
                 try:
                     with open(OBSTACLES_FILE, "r", encoding="utf-8") as f:
-                        file_data = json.load(f)
-                        st.json(file_data)
+                        obstacles_data = json.load(f)
+                    st.json(obstacles_data)
+                    
+                    # 添加复制按钮
+                    obstacles_json_str = json.dumps(obstacles_data, ensure_ascii=False, indent=2)
+                    st.download_button(
+                        label="📥 下载障碍物数据",
+                        data=obstacles_json_str,
+                        file_name=f"obstacles_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json",
+                        key="download_obstacles_data"
+                    )
                 except Exception as e:
-                    st.info(f"JSON文件读取失败: {str(e)}")
+                    st.error(f"读取失败: {e}")
+            else:
+                st.info("障碍物文件不存在，添加障碍物后会创建")
+        
+        with tab_file2:
+            col_info1, col_info2 = st.columns(2)
+            
+            with col_info1:
+                st.markdown("#### 📄 配置文件信息")
+                if os.path.exists(CONFIG_FILE):
+                    file_size = os.path.getsize(CONFIG_FILE)
+                    file_modified = datetime.fromtimestamp(os.path.getmtime(CONFIG_FILE))
+                    st.metric("文件大小", f"{file_size} 字节")
+                    st.metric("最后修改", file_modified.strftime("%Y-%m-%d %H:%M:%S"))
+                    
+                    # 读取文件行数
+                    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                        line_count = len(f.readlines())
+                    st.metric("文件行数", f"{line_count} 行")
+                else:
+                    st.info("文件不存在")
+            
+            with col_info2:
+                st.markdown("#### 🗺️ 障碍物文件信息")
+                if os.path.exists(OBSTACLES_FILE):
+                    file_size = os.path.getsize(OBSTACLES_FILE)
+                    file_modified = datetime.fromtimestamp(os.path.getmtime(OBSTACLES_FILE))
+                    st.metric("文件大小", f"{file_size} 字节")
+                    st.metric("最后修改", file_modified.strftime("%Y-%m-%d %H:%M:%S"))
+                    
+                    # 读取文件行数
+                    with open(OBSTACLES_FILE, "r", encoding="utf-8") as f:
+                        line_count = len(f.readlines())
+                    st.metric("文件行数", f"{line_count} 行")
+                else:
+                    st.info("文件不存在")
+            
+            st.divider()
+            st.markdown("#### 📊 数据统计")
+            
+            # 统计障碍物数量
+            col_stat1, col_stat2, col_stat3 = st.columns(3)
+            with col_stat1:
+                st.metric("当前障碍物数量", len(st.session_state.obstacles))
+            with col_stat2:
+                high_obstacles = sum(1 for obs in st.session_state.obstacles if obs.get("height", 0) >= st.session_state.flight_altitude)
+                st.metric("需绕行障碍物", high_obstacles)
+            with col_stat3:
+                low_obstacles = len(st.session_state.obstacles) - high_obstacles
+                st.metric("可飞越障碍物", low_obstacles)
+        
+        with tab_file3:
+            st.markdown("#### 💾 手动保存")
+            col_save1, col_save2 = st.columns(2)
+            with col_save1:
+                if st.button("💾 立即保存所有数据", key="manual_save_btn", use_container_width=True, type="primary"):
+                    save_all_data()
+                    st.success("✅ 数据已保存到JSON文件")
+                    st.balloons()
+            with col_save2:
+                if st.button("🔄 重新加载数据", key="reload_data_btn", use_container_width=True):
+                    if load_all_data():
+                        st.success("✅ 数据重新加载成功")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ 没有找到保存的数据文件")
+            
+            st.markdown("#### 🗑️ 文件清理")
+            col_clear1, col_clear2 = st.columns(2)
+            with col_clear1:
+                if st.button("🧹 清空障碍物数据", key="clear_obstacles_only", use_container_width=True):
+                    st.session_state.obstacles = []
+                    st.session_state.current_route = []
+                    st.session_state.current_waypoint_index = 0
+                    save_all_data()
+                    st.success("✅ 已清空障碍物数据并保存")
+                    st.rerun()
+            
+            with col_clear2:
+                if st.button("🗑️ 删除所有JSON文件", key="delete_all_json", use_container_width=True):
+                    try:
+                        if os.path.exists(CONFIG_FILE):
+                            os.remove(CONFIG_FILE)
+                        if os.path.exists(OBSTACLES_FILE):
+                            os.remove(OBSTACLES_FILE)
+                        st.success("✅ 已删除所有JSON文件")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"删除失败: {e}")
+            
+            st.markdown("#### 📋 文件路径信息")
+            st.code(f"""
+配置文件完整路径:
+{os.path.abspath(CONFIG_FILE) if os.path.exists(CONFIG_FILE) else os.path.join(current_dir, CONFIG_FILE)}
+
+障碍物文件完整路径:
+{os.path.abspath(OBSTACLES_FILE) if os.path.exists(OBSTACLES_FILE) else os.path.join(current_dir, OBSTACLES_FILE)}
+
+当前工作目录:
+{current_dir}
+            """, language="bash")
         
         if st.session_state.current_route:
             st.divider()
