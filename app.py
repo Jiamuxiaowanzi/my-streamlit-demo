@@ -57,6 +57,7 @@ st.title("🚁 无人机航线规划与飞行监控系统")
 
 # ====================== 配置文件 ======================
 CONFIG_FILE = "obstacle_config.json"
+OBSTACLES_FILE = "obstacles_data.json"  # 专门的障碍物数据文件
 
 # ====================== 初始化 Session State ======================
 if "start_point" not in st.session_state:
@@ -134,8 +135,39 @@ if "heartbeat_history" not in st.session_state:
 if "heartbeat_running" not in st.session_state:
     st.session_state.heartbeat_running = False
 
-# ====================== 保存/加载 ======================
-def save_data():
+# ====================== 保存/加载函数 ======================
+def save_obstacles_to_json():
+    """将障碍物数据保存到JSON文件"""
+    try:
+        obstacles_data = {
+            "obstacles": st.session_state.obstacles,
+            "total_count": len(st.session_state.obstacles),
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "flight_altitude": st.session_state.flight_altitude,
+            "safety_radius": st.session_state.safety_radius
+        }
+        with open(OBSTACLES_FILE, "w", encoding="utf-8") as f:
+            json.dump(obstacles_data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        st.error(f"保存障碍物数据失败: {str(e)}")
+        return False
+
+def load_obstacles_from_json():
+    """从JSON文件加载障碍物数据"""
+    if os.path.exists(OBSTACLES_FILE):
+        try:
+            with open(OBSTACLES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            st.session_state.obstacles = data.get("obstacles", [])
+            return True
+        except Exception as e:
+            st.error(f"加载障碍物数据失败: {str(e)}")
+            return False
+    return False
+
+def save_all_data():
+    """保存所有数据到JSON文件"""
     data = {
         "obstacles": st.session_state.obstacles,
         "start_point": st.session_state.start_point,
@@ -147,19 +179,32 @@ def save_data():
     }
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    # 同时保存障碍物到专用文件
+    save_obstacles_to_json()
 
-def load_data():
+def load_all_data():
+    """从JSON文件加载所有数据"""
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        st.session_state.obstacles = data.get("obstacles", [])
-        st.session_state.start_point = tuple(data.get("start_point", (32.2345, 118.7492)))
-        st.session_state.end_point = tuple(data.get("end_point", (32.2337, 118.7496)))
-        st.session_state.flight_altitude = data.get("flight_altitude", 15.0)
-        st.session_state.safety_radius = data.get("safety_radius", 15.0)
-        st.session_state.route_mode = data.get("route_mode", "best")
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            st.session_state.obstacles = data.get("obstacles", [])
+            st.session_state.start_point = tuple(data.get("start_point", (32.2345, 118.7492)))
+            st.session_state.end_point = tuple(data.get("end_point", (32.2337, 118.7496)))
+            st.session_state.flight_altitude = data.get("flight_altitude", 15.0)
+            st.session_state.safety_radius = data.get("safety_radius", 15.0)
+            st.session_state.route_mode = data.get("route_mode", "best")
+            return True
+        except Exception as e:
+            st.error(f"加载配置文件失败: {str(e)}")
+            return False
+    else:
+        # 尝试从专用障碍物文件加载
+        return load_obstacles_from_json()
 
-load_data()
+# 加载数据
+load_all_data()
 
 # ====================== 几何计算函数 ======================
 def calculate_distance(point1, point2):
@@ -693,18 +738,18 @@ with tab1:
     with col_btn1:
         if st.button("🎯 规划航线", key="plan_route_btn", use_container_width=True, type="primary"):
             plan_route()
-            save_data()
+            save_all_data()
     with col_btn2:
         if st.button("💾 保存数据", key="save_data_btn", use_container_width=True):
-            save_data()
-            st.success("✅ 已保存")
+            save_all_data()
+            st.success("✅ 障碍物数据已保存到JSON文件")
     with col_btn3:
         if st.button("🗑️ 清空障碍物", key="clear_obs_btn", use_container_width=True):
             st.session_state.obstacles = []
             st.session_state.current_route = []
             st.session_state.current_waypoint_index = 0
-            save_data()
-            st.success("✅ 已清空")
+            save_all_data()
+            st.success("✅ 已清空并保存")
     with col_btn4:
         if st.button("🗺️ 重置视图", key="reset_view_btn", use_container_width=True):
             st.session_state.map_center = [32.2341, 118.7494]
@@ -713,8 +758,8 @@ with tab1:
             st.session_state.obstacles = []
             st.session_state.current_route = []
             st.session_state.current_waypoint_index = 0
-            save_data()
-            st.success("✅ 已重置")
+            save_all_data()
+            st.success("✅ 已重置并保存")
     with col_btn5:
         if st.button("❌ 取消模式", key="cancel_mode_btn", use_container_width=True):
             st.session_state.set_mode = None
@@ -748,14 +793,14 @@ with tab1:
                         st.session_state.start_point = (lat, lng)
                         st.session_state.current_route = []
                         st.session_state.set_mode = None
-                        save_data()
+                        save_all_data()
                         st.toast("✅ 起点已设置", icon="✅")
                         st.rerun()
                     elif st.session_state.set_mode == 'end':
                         st.session_state.end_point = (lat, lng)
                         st.session_state.current_route = []
                         st.session_state.set_mode = None
-                        save_data()
+                        save_all_data()
                         st.toast("✅ 终点已设置", icon="✅")
                         st.rerun()
         
@@ -792,8 +837,8 @@ with tab1:
                         st.session_state.obstacles.append(new_obs)
                         st.session_state.pending_polygon = None
                         st.session_state.current_route = []
-                        save_data()
-                        st.success(f"✅ 已添加障碍物: {obs_name}")
+                        save_all_data()
+                        st.success(f"✅ 已添加障碍物: {obs_name}，数据已保存到JSON文件")
                         st.rerun()
                 with col_btn_b:
                     if st.button("❌ 取消", key="cancel_add_obs", use_container_width=True):
@@ -814,7 +859,7 @@ with tab1:
         if selected_mode != st.session_state.route_mode:
             st.session_state.route_mode = selected_mode
             st.session_state.current_route = []
-            save_data()
+            save_all_data()
         
         st.divider()
         
@@ -841,7 +886,7 @@ with tab1:
             if st.button("✈️ 更新起点", key="update_start_btn", use_container_width=True):
                 st.session_state.start_point = (new_start_lat, new_start_lng)
                 st.session_state.current_route = []
-                save_data()
+                save_all_data()
                 st.success("✅ 起点已更新")
         
         with st.expander("🏁 终点手动输入", expanded=False):
@@ -854,7 +899,7 @@ with tab1:
             if st.button("🎯 更新终点", key="update_end_btn", use_container_width=True):
                 st.session_state.end_point = (new_end_lat, new_end_lng)
                 st.session_state.current_route = []
-                save_data()
+                save_all_data()
                 st.success("✅ 终点已更新")
         
         st.divider()
@@ -868,7 +913,7 @@ with tab1:
         if new_altitude != st.session_state.flight_altitude:
             st.session_state.flight_altitude = new_altitude
             st.session_state.current_route = []
-            save_data()
+            save_all_data()
         
         new_radius = st.number_input(
             "🛡️ 安全半径（米）",
@@ -880,11 +925,49 @@ with tab1:
         if new_radius != st.session_state.safety_radius:
             st.session_state.safety_radius = new_radius
             st.session_state.current_route = []
-            save_data()
+            save_all_data()
         
         st.divider()
         
+        # 障碍物管理区域
         st.subheader(f"📦 障碍物列表 ({len(st.session_state.obstacles)})")
+        
+        # 添加导入/导出按钮
+        col_import, col_export = st.columns(2)
+        with col_import:
+            uploaded_file = st.file_uploader("导入障碍物JSON", type=["json"], key="import_obstacles")
+            if uploaded_file is not None:
+                try:
+                    imported_data = json.load(uploaded_file)
+                    if "obstacles" in imported_data:
+                        st.session_state.obstacles = imported_data["obstacles"]
+                        save_all_data()
+                        st.success(f"✅ 已导入 {len(imported_data['obstacles'])} 个障碍物")
+                        st.rerun()
+                    else:
+                        st.error("文件格式错误，缺少 'obstacles' 字段")
+                except Exception as e:
+                    st.error(f"导入失败: {str(e)}")
+        
+        with col_export:
+            if st.button("📤 导出障碍物JSON", key="export_obstacles", use_container_width=True):
+                export_data = {
+                    "obstacles": st.session_state.obstacles,
+                    "total_count": len(st.session_state.obstacles),
+                    "export_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "flight_altitude": st.session_state.flight_altitude,
+                    "safety_radius": st.session_state.safety_radius
+                }
+                json_str = json.dumps(export_data, ensure_ascii=False, indent=2)
+                st.download_button(
+                    label="📥 下载JSON文件",
+                    data=json_str,
+                    file_name=f"obstacles_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json",
+                    key="download_obstacles"
+                )
+        
+        st.markdown("---")
         
         if st.session_state.obstacles:
             for i, obs in enumerate(st.session_state.obstacles):
@@ -892,19 +975,32 @@ with tab1:
                 with col_a:
                     height = obs.get('height', 0)
                     name = obs.get('name', '未知')
+                    create_time = obs.get('create_time', '未知')
                     if height >= st.session_state.flight_altitude:
                         st.markdown(f"**🔴 {name}** | {height}m (需绕行)")
                     else:
                         st.markdown(f"**🟢 {name}** | {height}m (可飞越)")
+                    st.caption(f"创建于: {create_time}")
                 with col_b:
                     if st.button("🗑️", key=f"del_obs_{i}", use_container_width=True):
                         st.session_state.obstacles.pop(i)
                         st.session_state.current_route = []
                         st.session_state.current_waypoint_index = 0
-                        save_data()
+                        save_all_data()
                         st.rerun()
         else:
             st.info("📭 暂无障碍物，请在地图上绘制多边形")
+        
+        # 显示JSON文件信息
+        if os.path.exists(OBSTACLES_FILE):
+            st.divider()
+            with st.expander("📄 查看JSON文件信息"):
+                try:
+                    with open(OBSTACLES_FILE, "r", encoding="utf-8") as f:
+                        file_data = json.load(f)
+                        st.json(file_data)
+                except Exception as e:
+                    st.info(f"JSON文件读取失败: {str(e)}")
         
         if st.session_state.current_route:
             st.divider()
